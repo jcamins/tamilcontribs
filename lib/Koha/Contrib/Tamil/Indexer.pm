@@ -47,6 +47,13 @@ has select => (
     default  => 'all',
 );
 
+has since => (
+    is       => 'rw',
+    isa      => 'Str',
+    required => 0,
+    default  => '',
+);
+
 has directory => (
     is      => 'rw',
     isa     => 'Str',
@@ -112,6 +119,7 @@ sub run {
             koha   => $self->koha,
             source => $self->source,
             select => $is_full_indexing ? 'all' : 'queue_update',
+            since  => $self->since,
             xml    => '1'
         ),
         writer => Koha::Contrib::Tamil::RecordWriter::File::Marcxml->new(

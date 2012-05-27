@@ -9,6 +9,8 @@ use AnyEvent;
 use Koha::Contrib::Tamil::Koha;
 use Koha::Contrib::Tamil::Indexer;
 use Locale::TextDomain ('Koha-Contrib-Tamil');
+use DateTime;
+use DateTime::Format::MySQL;
 
 with 'MooseX::Getopt';
 
@@ -48,6 +50,15 @@ has timeout => (
     default => 60,
 );
 
+has usetimestamp => (
+    is      => 'rw',
+    isa     => 'Bool',
+    default => 0,
+);
+
+has lastrun => ( is => 'rw', isa => 'Str' );
+
+
 
 =attr verbose(0|1)
 
@@ -58,6 +69,8 @@ Task verbosity.
 has verbose => ( is => 'rw', isa => 'Bool', default => 0 );
 
 has koha => ( is => 'rw', isa => 'Koha::Contrib::Tamil::Koha' );
+
+has unblocking => ( is => 'rw', isa => 'Bool', default => 0 );
 
 
 sub BUILD {
@@ -75,19 +88,37 @@ sub BUILD {
         interval => $self->timeout,
         cb       => sub { $self->index_zebraqueue(); }
     );
-    AnyEvent->condvar->recv;
+    AnyEvent->condvar->recv unless $self->unblocking;
 }
 
 
 sub index_zebraqueue {
     my $self = shift;
 
-    my $sql = " SELECT COUNT(*), server 
+    my $sql;
+
+    my $since = $self->lastrun;
+    warn "$since\n";
+
+    my $runstart = DateTime->now( time_zone => 'local' );
+
+    if ($self->usetimestamp) {
+        $sql = "SELECT COUNT(*), server 
+                FROM zebraqueue 
+                WHERE time >= ?
+                GROUP BY server ";
+    } else {
+        $sql = "SELECT COUNT(*), server 
                 FROM zebraqueue 
                 WHERE done = 0
                 GROUP BY server ";
-    my $sth = $self->koha->dbh->prepare($sql);
-    $sth->execute();
+    }
+    my $sth = $self->koha->dbh->prepare_cached($sql);
+    if ($self->usetimestamp) {
+        $sth->execute($since);
+    } else {
+        $sth->execute();
+    }
     my %count = ( biblio => 0, authority => 0 );
     while ( my ($count, $server) = $sth->fetchrow ) {
         $server =~ s/server//g;
@@ -107,11 +138,13 @@ sub index_zebraqueue {
             source      => $source,
             select      => 'queue',
             blocking    => 1,
+            since       => ($self->usetimestamp ? $since : ''),
             verbose     => $self->verbose,
         );
         $indexer->directory($self->directory) if $self->directory;
         $indexer->run();
     }
+    $self->lastrun(DateTime::Format::MySQL->format_datetime($runstart));
 }
 
 no Moose;

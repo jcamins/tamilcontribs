@@ -44,6 +44,13 @@ has select => (
     default  => 'all',
 );
 
+has since => (
+    is       => 'rw',
+    isa      => 'Str',
+    required => 0,
+    default  => '',
+);
+
 has xml => ( is => 'rw', isa => 'Bool', default => '0' );
 
 has sth => ( is => 'rw' );
@@ -84,24 +91,42 @@ sub BUILD {
                     ? 'specialUpdate'
                     : 'recordDelete';
     $self->allrecords( $self->select =~ /all/i ? 1 : 0 );
-    my $sql =
-        $self->source =~ /biblio/i
-            ? $self->allrecords
-                ? "SELECT NULL, biblionumber FROM biblio"
-                : "SELECT id, biblio_auth_number FROM zebraqueue
-                   WHERE server = 'biblioserver'
-                     AND operation = '$operation' AND done = 0"
-            : $self->allrecords
-                ? "SELECT NULL, authid FROM auth_header"
-                : "SELECT id, biblio_auth_number FROM zebraqueue
-                   WHERE server = 'authorityserver'
-                     AND operation = '$operation' AND done = 0";
-    my $sth = $self->koha->dbh->prepare( $sql );
-    $sth->execute();
+    my $sql;
+        if ($self->source =~ /biblio/i) {
+            if ($self->allrecords) {
+                $sql =  "SELECT NULL, biblionumber FROM biblio";
+            } elsif ($self->since)  {
+                $sql = "SELECT id, biblio_auth_number FROM zebraqueue
+                        WHERE server = 'biblioserver'
+                        AND time >= ? AND done = 0";
+            } else {
+                $sql = "SELECT id, biblio_auth_number FROM zebraqueue
+                        WHERE server = 'biblioserver'
+                        AND operation = '$operation' AND done = 0";
+            }
+        } else {
+            if ($self->allrecords) {
+                $sql = "SELECT NULL, authid FROM auth_header";
+            } elsif ($self->since)  {
+                $sql = "SELECT id, biblio_auth_number FROM zebraqueue
+                        WHERE server = 'authorityserver'
+                        AND time >= ? AND done = 0";
+            } else {
+                $sql = "SELECT id, biblio_auth_number FROM zebraqueue
+                        WHERE server = 'authorityserver'
+                        AND operation = '$operation' AND done = 0";
+            }
+        }
+    my $sth = $self->koha->dbh->prepare_cached( $sql );
+    if ($self->since) {
+        $sth->execute($self->since);
+    } else {
+        $sth->execute();
+    }
     $self->sth( $sth );
 
-    unless ( $self->allrecords ) {
-        $self->sth_queue_done( $self->koha->dbh->prepare(
+    unless ( $self->allrecords || $self->since ) {
+        $self->sth_queue_done( $self->koha->dbh->prepare (
             "UPDATE zebraqueue SET done=1 WHERE id=?" ) );
     }
 
@@ -122,7 +147,7 @@ sub read {
     my $self = shift;
     while ( my ($queue_id, $id) = $self->sth->fetchrow ) {
         # Suppress entry in zebraqueue table
-        $self->sth_queue_done->execute($queue_id) if $queue_id;
+        $self->sth_queue_done->execute($queue_id) if ($queue_id && !$self->since);
         if ( my $record = $self->get( $id ) ) {
             $self->count($self->count+1);
             $self->id( $id );
