@@ -8,17 +8,41 @@ use 5.010;
 use utf8;
 use warnings;
 use strict;
+use lib("/usr/share/koha/lib");
 use Koha::Contrib::Tamil::IndexerDaemon;
 use Pod::Usage;
 use AnyEvent;
+use File::Basename;
+use Fcntl qw(:DEFAULT :flock);
+
+my $program_name = basename($0);
+
+open(SELFLOCK, "<$0") or die("Couldn't open $0: $!\n");
+flock(SELFLOCK, LOCK_EX | LOCK_NB) or die("Aborting: another $program_name is already running\n");
+
+open(STDOUT, "|-", "logger -t $program_name") or die("Couldn't open logger output stream: $!\n");
+open(STDERR, ">&STDOUT") or die("Couldn't redirect STDERR to STDOUT: $!\n");
+$| = 1; # Make output line-buffered so it will be flushed to syslog faster
+ 
+chdir('/'); # Avoid the possibility of our working directory resulting in keeping an otherwise unused filesystem in use
+
+# Double-fork to avoid leaving a zombie process behind:
+exit if (fork());
+exit if (fork());
+sleep 1 until getppid() == 1;
+ 
+print "$program_name $$ successfully daemonized\n";
 
 foreach my $instance (`/usr/sbin/koha-list`) {
+    chop $instance;
     Koha::Contrib::Tamil::IndexerDaemon->new_with_options(   
        conf => "/etc/koha/sites/$instance/koha-conf.xml",
        unblocking => 1
     );
 }
 AnyEvent->condvar->recv;
+
+close(SELFLOCK);
 
 __END__
 
