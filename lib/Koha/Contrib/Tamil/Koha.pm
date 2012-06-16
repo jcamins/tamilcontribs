@@ -39,6 +39,7 @@ Koha XML configuration file.
 
 has conf => ( is => 'rw' );
 
+has context => ( is => 'rw' );
 
 has _zconn => ( is => 'rw', isa => 'HashRef' );
 
@@ -48,6 +49,10 @@ sub BUILD {
 
     # Use KOHA_CONF environment variable by default
     $self->conf_file( $ENV{KOHA_CONF} )  unless $self->conf_file;
+
+    require C4::Context;
+    $self->context(C4::Context->new($self->conf_file));
+    $self->context->set_context();
 
     $self->conf( XMLin( $self->conf_file, 
         keyattr => ['id'], forcearray => ['listen', 'server', 'serverinfo'],

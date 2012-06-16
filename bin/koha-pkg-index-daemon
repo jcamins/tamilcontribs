@@ -33,16 +33,22 @@ sleep 1 until getppid() == 1;
  
 print "$program_name $$ successfully daemonized\n";
 
+my @indexers;
+
 foreach my $instance (`/usr/sbin/koha-list`) {
     chop $instance;
-    Koha::Contrib::Tamil::IndexerDaemon->new_with_options(   
-       conf => "/etc/koha/sites/$instance/koha-conf.xml",
-       unblocking => 1
-    );
+    my $child = fork();
+    if ($child) {
+        push @indexers, $child;
+    } else {
+        Koha::Contrib::Tamil::IndexerDaemon->new_with_options(   
+            conf => "/etc/koha/sites/$instance/koha-conf.xml",
+        );
+    }
 }
-AnyEvent->condvar->recv;
 
-close(SELFLOCK);
+sleep 10 while (waitpid(-1, 0));
+warn "Koha indexer daemon terminated\n";
 
 __END__
 

@@ -98,7 +98,6 @@ sub index_zebraqueue {
     my $sql;
 
     my $since = $self->lastrun;
-    warn "$since\n";
 
     my $runstart = DateTime->now( time_zone => 'local' );
 
